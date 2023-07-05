@@ -1,0 +1,8 @@
+discord~=2.0.0
+discord[voice]
+bs4~=0.0.1
+ffmpy~=0.3.0
+PyNaCl
+yt-dlp
+beautifulsoup4~=4.11.1
+openai~=0.27.2
