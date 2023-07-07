@@ -24,12 +24,13 @@ class MDownloader:
             try:
                 info = ydl.extract_info(search_string, download=False)
                 raw_title = info['entries'][0]['title']
-                title = re.sub('[^a-zA-Z0-9\-_ .`\'|/]', '', raw_title)  # Remove special characters
+                title = re.sub('[^a-zA-Z0-9\-_ .`\'|/~]', '', raw_title)  # Remove special characters
                 title = title.replace(" ", "_")
                 title = title.replace("`", "_")
                 title = title.replace("'", "_")
                 title = title.replace("|", "_")
                 title = title.replace("/", "_")
+                title = title.replace("~", "_")
                 title = re.sub('_+', '_', title)
                 filename = f"downloads/{title}.mp3"
 
