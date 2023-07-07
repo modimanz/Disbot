@@ -55,11 +55,26 @@ class MusicCog(commands.Cog):
         self.voice_channel = channel
         return
 
-    def add_to_queue(self, guild_id, filename):
+    def add_to_queue(self, ctx, song):
+        guild_id = ctx.guild.id
+
+        user_id = ctx.message.author.id
+        username = ctx.message.author.name
+
+        title, raw_title, filename, search):
+        song_info = {
+            'title': title,
+            'uid': user_id,
+            'username': username,
+            'file_path': filename,
+            'raw_title': raw_title,
+            'search': search,
+        }
+
         if guild_id in self.music_queue:
-            self.music_queue[guild_id].append(filename)
+            self.music_queue[guild_id].append(song_info)
         else:
-            self.music_queue[guild_id] = [filename]
+            self.music_queue[guild_id] = [song_info]
 
     def save_current_queue_as_playlist(self, guild_id, playlist_name):
         self.playlist_manager.create_playlist(playlist_name, self.music_queue[guild_id])

@@ -11,26 +11,110 @@ TODO need to handle error cases,
     create corresponding Discord
 """
 
+class Song:
+    def __init__(self, title, user_id, username, file_path, raw_title, search_string):
+        self.title = title
+        self.user_id = user_id
+        self.username = username
+        self.file_path = file_path
+        self.raw_title = raw_title
+        self.search_string = search_string
+
+    def to_dict(self):
+        return {
+            'title': self.title,
+            'user_id': self.user_id,
+            'username': self.username,
+            'file_path': self.file_path,
+            'raw_title': self.raw_title,
+            'search_string': self.search_string
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            title=data.get('title'),
+            user_id=data.get('user_id'),
+            username=data.get('username'),
+            file_path=data.get('file_path'),
+            raw_title=data.get('raw_title'),
+            search_string=data.get('search_string'),
+        )
+
+
+class Playlist:
+    def __init__(self, name, creator_id, creator_username, songs):
+        self.name = name
+        self.creator_id = creator_id
+        self.creator_username = creator_username
+        self.songs = songs
+
+    def add_song(self, song):
+        self.songs.append(song)
+
+    def remove_song(self, song_index):
+        if song_index < len(self.songs):
+            self.songs.pop(song_index)
+        else:
+            print("Invalid index")
+
+    def to_dict(self):
+        return {
+            'name': self.name,
+            'creator_id': self.creator_id,
+            'creator_username': self.creator_username,
+            'songs': [song.to_dict() for song in self.songs],
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            name=data.get('name'),
+            creator_id=data.get('creator_id'),
+            creator_username=data.get('creator_username'),
+            songs=[Song.from_dict(song_data) for song_data in data.get('songs', [])],
+        )
+
 
 class PlaylistManager:
     def __init__(self):
         self.playlists_folder = 'playlists'
         os.makedirs(self.playlists_folder, exist_ok=True)  # Ensure the directory exists
 
-    def create_playlist(self, playlist_name, song_list):
+    def create_playlist(self, name, creator_id, creator_username, song_list=[]):
+
         # Sanitize the playlist name and add ".json" suffix
-        playlist_filename = re.sub(r'\W+', '', playlist_name) + '.json'
+        playlist_filename = re.sub(r'\W+', '', name) + '.json'
+        new_playlist = Playlist(name, creator_id, creator_username, songs=song_list)
+
         with open(os.path.join(self.playlists_folder, playlist_filename), 'w') as f:
             json.dump(song_list, f)
 
-    def get_playlist(self, playlist_name):
-        playlist_filename = re.sub(r'\W+', '', playlist_name) + '.json'
-        with open(os.path.join(self.playlists_folder, playlist_filename), 'r') as f:
-            song_list = json.load(f)
-        return song_list
+    # def get_playlist(self, playlist_name):
+    #    playlist_filename = re.sub(r'\W+', '', playlist_name) + '.json'
+    #    with open(os.path.join(self.playlists_folder, playlist_filename), 'r') as f:
+    #        song_list = json.load(f)
+    #    return song_list
+
+    # Saving playlist to a file
+    def save_playlist(self, playlist):
+        filepath = os.path.join(self.playlists_folder, playlist.name + '.json')
+        with open(filepath, 'w') as f:
+            json.dump(playlist.to_dict(), f)
+
+    # Loading playlist from a file
+    def load_playlist(self, name):
+        filepath = os.path.join(self.playlists_folder, name + '.json')
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        return Playlist.from_dict(data)
 
     def list_playlists(self):
         return [os.path.basename(x) for x in glob.glob(f'{self.playlists_folder}/*.json')]
+
+    def add_to_playlist(self, ctx, playlist_name, song):
+        # TODO COMPLETE
+        pass
 
     def remove_from_playlist(self, playlist_name, song_index):
         song_list = self.get_playlist(playlist_name)
