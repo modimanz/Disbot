@@ -9,16 +9,22 @@ from yt_dlp import YoutubeDL
 
 import settings
 import utils.fileman
+import json
+from . import playlist_manager  # import PlaylistManager
+from .downloader import MDownloader
 
 
 class MusicCog(commands.Cog):
 
     def __init__(self, dbot: commands.Bot):
+        self.repeat_mode = {}
         self.bot = dbot
         super().__init__()
         self.voice_channel = ""
         self.music_queue = {}
         self.now_playing = {}
+        self.playlist_manager = playlist_manager.PlaylistManager()
+        self.downloader = MDownloader()
 
     # @app_commands.command(name="mplay")
     # async def mplay(self, interaction: discord.Interaction) -> None:
@@ -55,6 +61,12 @@ class MusicCog(commands.Cog):
         else:
             self.music_queue[guild_id] = [filename]
 
+    def save_current_queue_as_playlist(self, guild_id, playlist_name):
+        self.playlist_manager.create_playlist(playlist_name, self.music_queue[guild_id])
+
+    def load_playlist_to_queue(self, guild_id, playlist_name):
+        self.music_queue[guild_id] = self.playlist_manager.get_playlist(playlist_name)
+
     async def leave(self, ctx: commands.Context):
         voice_client = ctx.voice_client  # .guild.voice_client
         if self.is_connected(ctx):
@@ -83,11 +95,13 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name="sync")
     async def sync(self, ctx: commands.Context) -> None:
+        """ Sync the bot commands """
         # TODO Only Allow ME (Morgan) to run this command
         await self.bot.tree.sync()
 
     @commands.hybrid_command(name="stop")
     async def stop_audio(self, ctx: commands.Context):
+        """ Stop the playing audio """
         if ctx.voice_client.is_playing():
             ctx.voice_client.stop()
             await ctx.send("Stopped Playing.")
@@ -96,7 +110,7 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name="mrando")
     async def mrando(self, ctx: commands.Context) -> None:
-        """ /mrando """
+        """ Play a random song from Mobi's collection.... careful """
         await self.join(ctx)
 
         voice_client = ctx.voice_client  # .client
@@ -145,17 +159,62 @@ class MusicCog(commands.Cog):
             'options': '-vn',
         }
 
+    @commands.hybrid_command(name="save_queue", help="Saves the current queue to a file")
+    async def save_queue(self, ctx, playlist_name):
+        self.save_current_queue_as_playlist(ctx.guild.id, playlist_name)
+        await ctx.send(f"Saved current queue as playlist {playlist_name}")
+
+    @commands.hybrid_command(name="start_playing", help="Start Playing Music")
+    async def start_playing(self, ctx):
+        await self.join(ctx)
+        self.play_next(ctx)
+        await ctx.send(f"Started Music... Hopefully")
+
+    @commands.hybrid_command(name="load_queue", help="Loads a queue from a file")
+    async def load_queue(self, ctx, playlist_name):
+        self.load_playlist_to_queue(ctx.guild.id, playlist_name)
+        await self.join(ctx)
+        self.play_next(ctx)
+        await ctx.send(f"Loaded playlist {playlist_name} into queue")
+
+    # def play_next(self, ctx):
+    #    if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
+    #        if not ctx.voice_client.is_playing():
+    #            next_song = self.music_queue[ctx.guild.id].pop(0)
+    #            self.now_playing[ctx.guild.id] = next_song
+    #            ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
+    #    else:
+    #        asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
+
+    # def play_next(self, ctx):
+    #    if ctx.voice_client is not None and not ctx.voice_client.is_playing():
+    #        if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
+    #            if ctx.guild.id in self.repeat_mode and self.repeat_mode[ctx.guild.id] == True:
+    #                next_song = self.now_playing[ctx.guild.id]
+    #            else:
+    #                next_song = self.music_queue[ctx.guild.id].pop(0)
+    #                self.now_playing[ctx.guild.id] = next_song
+    #            ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
+    #        else:
+    #            asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
+
     def play_next(self, ctx):
-        if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
-            if not ctx.voice_client.is_playing():
+        if ctx.voice_client is not None and not ctx.voice_client.is_playing():
+            # Check for repeat mode first, repeat the current song if repeat mode is on
+            if ctx.guild.id in self.repeat_mode and self.repeat_mode[ctx.guild.id] == True:
+                next_song = self.now_playing[ctx.guild.id]
+                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
+            elif ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
+                # Repeat mode is off or not set, pop the next song from the queue and play it
                 next_song = self.music_queue[ctx.guild.id].pop(0)
                 self.now_playing[ctx.guild.id] = next_song
                 ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
-        else:
-            asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
+            else:
+                asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
 
     @commands.hybrid_command(name='now_playing')
     async def current_song(self, ctx: commands.Context):
+        """ Show the current song playing """
         if ctx.guild.id in self.now_playing:
             await ctx.send(f"Currently playing: {self.now_playing[ctx.guild.id]}")
         else:
@@ -163,6 +222,7 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name='mqueue')
     async def show_queue(self, ctx: commands.Context) -> None:
+        """ Show the queue """
         if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
             queue_list = "\n".join([f"{i + 1}. {song}" for i, song in enumerate(self.music_queue[ctx.guild.id])])
             await ctx.send(f"Queue:\n{queue_list}")
@@ -171,7 +231,9 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name='skip')
     async def skip_song(self, ctx: commands.Context) -> None:
+        """ Skip the current track """
         if ctx.voice_client.is_playing():
+            self.repeat_mode[ctx.guild.id] = False
             ctx.voice_client.stop()
             await ctx.send("Skipped to the next song.")
         else:
@@ -187,7 +249,7 @@ class MusicCog(commands.Cog):
                 help_embed.add_field(name=f"{command.name}", value=command.help, inline=False)
         await ctx.send(embed=help_embed)
 
-    @commands.hybrid_command(name='remove')
+    @commands.hybrid_command(name='remove', help="Remove a song at <position> from the queue")
     async def remove_song(self, ctx: commands.Context, position: int) -> None:
         if ctx.guild.id in self.music_queue and 1 <= position <= len(self.music_queue[ctx.guild.id]):
             removed_song = self.music_queue[ctx.guild.id].pop(position - 1)  # Subtract 1 because lists are 0-indexed
@@ -195,44 +257,17 @@ class MusicCog(commands.Cog):
         else:
             await ctx.send("There is no song at that position in the queue.")
 
-    @commands.hybrid_command(name='old_mplay_old')
-    async def download_and_play_from_moob(self, ctx: commands.Context, *, search_string) -> None:
-        YDL_OPTIONS = {
-            'format': 'bestaudio/best',
-            'noplaylist': 'True',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'default_search': 'auto',
-        }
+    @commands.hybrid_command(name="repeat", help="Repeat the song forever")
+    async def repeat(self, ctx: commands.Context):
+        if ctx.guild.id not in self.repeat_mode:
+            self.repeat_mode[ctx.guild.id] = False
+        self.repeat_mode[ctx.guild.id] = not self.repeat_mode[ctx.guild.id]
+        if self.repeat_mode[ctx.guild.id]:
+            await ctx.send("Repeat mode is now ON.")
+        else:
+            await ctx.send("Repeat mode is now OFF.")
 
-        with YoutubeDL(YDL_OPTIONS) as ydl:
-            try:
-                info = ydl.extract_info(search_string, download=False)
-                raw_title = info['entries'][0]['title']
-                title = re.sub('[^a-zA-Z0-9 ]', '', raw_title)  # Remove special characters
-                filename = f"downloads/{title}.mp3"
-
-                # Check if the file exists before downloading it
-                if not os.path.isfile(filename):
-                    url = info['entries'][0]['webpage_url']
-                    ydl.download([url])
-            except Exception:
-                await ctx.send("Error: Song not found.")
-                return
-
-            try:
-                self.add_to_queue(ctx.guild.id, filename)
-                if not ctx.voice_client.is_playing():
-                    self.play_next(ctx)
-                await ctx.send(f"Added {title} to the queue.")
-            except Exception:
-                await ctx.send("Error: Unable to add the song to queue.")
-
-    @commands.hybrid_command(name='mplay')
+    @commands.hybrid_command(name='mplay', help="Play a song from you know...")
     async def download_and_play_from_youtube(self, ctx: commands.Context, *, search_string):
         YDL_OPTIONS = {
             'format': 'bestaudio/best',
@@ -246,40 +281,43 @@ class MusicCog(commands.Cog):
             'default_search': 'auto',
         }
         await ctx.send("Searching and downloading your request. This might take a moment.")
-        self.bot.loop.create_task(self.download_and_play(ctx, search_string, YDL_OPTIONS))
+        self.bot.loop.create_task(self.download_and_play(ctx, search_string))
 
-    async def download_and_play(self, ctx, search_string, YDL_OPTIONS):
+    @commands.hybrid_command(name='move', help="Move a song from <current_index> to <new_index> in the queue")
+    async def move(self, ctx, current_index: int, new_index: int):
+        """Move a song in the queue from one position to another"""
+        # Check if there is a music queue for the current guild
+        if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
+            # Make sure the current_index and new_index are within the queue length
+            if 0 <= current_index < len(self.music_queue[ctx.guild.id]) and 0 <= new_index < len(
+                    self.music_queue[ctx.guild.id]):
+                # Move the song in the queue
+                song = self.music_queue[ctx.guild.id].pop(current_index)
+                self.music_queue[ctx.guild.id].insert(new_index, song)
+                await ctx.send(f"Moved song from position {current_index} to {new_index}")
+            else:
+                await ctx.send("Invalid index!")
+        else:
+            await ctx.send("The music queue is empty!")
+
+    async def download_and_play(self, ctx, search_string):
         print("WORKING \n")
-        with YoutubeDL(YDL_OPTIONS) as ydl:
-            try:
-                info = ydl.extract_info(search_string, download=False)
-                raw_title = info['entries'][0]['title']
-                title = re.sub('[^a-zA-Z0-9\-_ .]', '', raw_title)  # Remove special characters
-                title = title.replace(" ", "_")
-                filename = f"downloads/{title}.mp3"
 
-                print("Filename: %s\n" % filename)
+        raw_title, title, filename = self.downloader.download(search_string)
 
-                # Check if the file exists before downloading it
-                if not os.path.isfile(filename):
-                    url = info['entries'][0]['webpage_url']
-                    #YDL_OPTIONS['outtmpl'] = 'downloads/%(title)s.%(ext)s'  # Update output template
-                    YDL_OPTIONS['restrictfilenames'] = True
-                    ydl.download([url])
-            except Exception as e:
-                print(e)
-                await ctx.send("Error: Song not found.")
-                return
+        if not filename:
+            await ctx.send("Error: Song not found.")
+            return
 
-            try:
-                await self.join(ctx)
-                self.add_to_queue(ctx.guild.id, filename)
-                if not ctx.voice_client.is_playing():
-                    self.play_next(ctx)
-                await ctx.send(f"Added {title} to the queue.")
-            except Exception as e:
-                print(e)
-                await ctx.send("Error: Unable to add the song to queue.")
+        try:
+            await self.join(ctx)
+            self.add_to_queue(ctx.guild.id, filename)
+            if not ctx.voice_client.is_playing():
+                self.play_next(ctx)
+            await ctx.send(f"Added {raw_title} to the queue.")
+        except Exception as e:
+            print(e)
+            await ctx.send("Error: Unable to add the song to queue.")
 
 
 async def setup(dbot: commands.Bot) -> None:

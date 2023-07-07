@@ -10,9 +10,7 @@ class Dcog(commands.Cog):
         super().__init__()
         self.chatBot = ChatBot()
 
-
-
-    @commands.hybrid_command(name="mjoin")
+    @commands.hybrid_command(name="mjoin", help="Have bot join your channel")
     async def mjoin(self, ctx: commands.Context) -> None:
         if not ctx.message.author.voice:
             await ctx.send("{} is not connected to a voice channel".
@@ -23,7 +21,7 @@ class Dcog(commands.Cog):
         await channel.connect()
         await ctx.send("Yo!")
 
-    @commands.hybrid_command(name="mleave")
+    @commands.hybrid_command(name="mleave", help="Tell bot to disconnect from voice client")
     async def mleave(self, ctx: commands.Context) -> None:
         voice_client = ctx.message.guild.voice_client
         if voice_client.is_connected():
@@ -34,18 +32,28 @@ class Dcog(commands.Cog):
 
     async def ask_chat_gpt(self, ctx, question):
         try:
-            response = self.chatBot.generate_response(question)
+            response = self.chatBot.generate_response(ctx.author.id, question)
             print(response)
             await ctx.send(response)
         except Exception as e:
             print(e)
             await ctx.send("I can't talk to chat GPT right now")
 
-    @commands.hybrid_command(name="ask")
+    @commands.hybrid_command(name="ask", help="Have bot ask chatgpt a question")
     async def ask(self, ctx: commands.Context, question: str = "") -> None:
 
-        await ctx.send("Asking your question. This might take a moment.")
+        await ctx.send("%s: %s. \nThis might take a moment..." % (ctx.author.name, question))
         self.bot.loop.create_task(self.ask_chat_gpt(ctx, question))
+
+    @commands.hybrid_command(name="set_attitude", help="Set the bot's attitude for a specific user: Example 'You are a friendly and helpful assistant'")
+    async def set_attitude(self, ctx: commands.Context, *, attitude_prompt: str) -> None:
+        self.chatBot.set_attitude(ctx.author.id, attitude_prompt)
+        await ctx.send(f"Set bot's attitude for user {ctx.author.id} to {attitude_prompt}")
+
+    @commands.hybrid_command(name="set_temperature", help="Set the bot's temperature for a specific user from 0 to 1")
+    async def set_temperature(self, ctx: commands.Context, temperature: float) -> None:
+        self.chatBot.set_temperature(ctx.author.id, temperature)
+        await ctx.send(f"Set bot's temperature for user {ctx.author.id} to {temperature}")
 
 
 async def setup(dbot: commands.Bot) -> None:
