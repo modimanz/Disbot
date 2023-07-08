@@ -11,6 +11,7 @@ TODO need to handle error cases,
     create corresponding Discord
 """
 
+
 class Song:
     def __init__(self, title, user_id, username, file_path, raw_title, search_string):
         self.title = title
@@ -19,6 +20,7 @@ class Song:
         self.file_path = file_path
         self.raw_title = raw_title
         self.search_string = search_string
+        self.play_count = 0
 
     def to_dict(self):
         return {
@@ -29,6 +31,28 @@ class Song:
             'raw_title': self.raw_title,
             'search_string': self.search_string
         }
+
+    def save(self, folder='songs'):
+        # Create the songs folder if it doesn't exist
+        os.makedirs(folder, exist_ok=True)
+
+        # Prepare filename
+        filename = self.title.replace(" ", "_") + '.json'
+        file_path = os.path.join(folder, filename)
+
+        # Convert the song's data to a dictionary
+        song_dict = {
+            "title": self.title,
+            "user_id": self.user_id,
+            "username": self.username,
+            "file_path": self.file_path,
+            "raw_title": self.raw_title,
+            "search_string": self.search_string
+        }
+
+        # Write the dictionary to a JSON file
+        with open(file_path, 'w') as json_file:
+            json.dump(song_dict, json_file)
 
     @classmethod
     def from_dict(cls, data):
@@ -109,8 +133,15 @@ class PlaylistManager:
             data = json.load(f)
         return Playlist.from_dict(data)
 
-    def list_playlists(self):
-        return [os.path.basename(x) for x in glob.glob(f'{self.playlists_folder}/*.json')]
+    def list_playlists(playlists_dir='playlists'):
+        playlist_names = []
+
+        for file in os.listdir(playlists_dir):
+            with open(os.path.join(playlists_dir, file), 'r') as f:
+                playlist = json.load(f)
+                playlist_names.append(playlist.get('name', 'No name'))
+
+        return playlist_names
 
     def add_to_playlist(self, ctx, playlist_name, song):
         # TODO COMPLETE

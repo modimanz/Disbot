@@ -10,7 +10,7 @@ from yt_dlp import YoutubeDL
 import settings
 import utils.fileman
 import json
-from . import playlist_manager  # import PlaylistManager
+from .playlist_manager import *  # playlist_manager  # import PlaylistManager
 from .downloader import MDownloader
 
 
@@ -23,7 +23,7 @@ class MusicCog(commands.Cog):
         self.voice_channel = ""
         self.music_queue = {}
         self.now_playing = {}
-        self.playlist_manager = playlist_manager.PlaylistManager()
+        self.playlist_manager = PlaylistManager()
         self.downloader = MDownloader()
 
     # @app_commands.command(name="mplay")
@@ -55,26 +55,13 @@ class MusicCog(commands.Cog):
         self.voice_channel = channel
         return
 
-    def add_to_queue(self, ctx, song):
+    def add_to_queue(self, ctx, song: Song):
         guild_id = ctx.guild.id
 
-        user_id = ctx.message.author.id
-        username = ctx.message.author.name
-
-        title, raw_title, filename, search):
-        song_info = {
-            'title': title,
-            'uid': user_id,
-            'username': username,
-            'file_path': filename,
-            'raw_title': raw_title,
-            'search': search,
-        }
-
         if guild_id in self.music_queue:
-            self.music_queue[guild_id].append(song_info)
+            self.music_queue[guild_id].append(song)
         else:
-            self.music_queue[guild_id] = [song_info]
+            self.music_queue[guild_id] = [song]
 
     def save_current_queue_as_playlist(self, guild_id, playlist_name):
         self.playlist_manager.create_playlist(playlist_name, self.music_queue[guild_id])
