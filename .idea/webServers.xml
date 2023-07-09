@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="8ad76ccb-78fb-4032-a455-8558340ce2f6" name="Local-Live" url="http://localhost">
+        <fileTransfer mountedRoot="C:\Users\mreg\Projects\Live\Disbot" accessType="MOUNT" port="0" />
+      </webServer>
+    </option>
+  </component>
+</project>

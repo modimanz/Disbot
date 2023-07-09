@@ -17,7 +17,7 @@ from .downloader import MDownloader
 class MusicCog(commands.Cog):
 
     def __init__(self, dbot: commands.Bot):
-        self.repeat_mode = {}
+        # self.repeat_mode = {}
         self.bot = dbot
         super().__init__()
         self.voice_channel = ""
@@ -63,11 +63,14 @@ class MusicCog(commands.Cog):
         else:
             self.music_queue[guild_id] = [song]
 
-    def save_current_queue_as_playlist(self, guild_id, playlist_name):
-        self.playlist_manager.create_playlist(playlist_name, self.music_queue[guild_id])
+    def save_current_queue_as_playlist(self, guild_id, playlist_name, uid, uname):
+        self.playlist_manager.create_playlist(playlist_name, uid, uname, self.music_queue[guild_id])
 
-    def load_playlist_to_queue(self, guild_id, playlist_name):
-        self.music_queue[guild_id] = self.playlist_manager.get_playlist(playlist_name)
+    def load_playlist_to_queue(self, guild_id, playlist_name, append=False):
+        if append:
+            self.music_queue[guild_id] = self.music_queue[guild_id] + self.playlist_manager.load_playlist(playlist_name).songs
+        else:
+            self.music_queue[guild_id] = self.playlist_manager.load_playlist(playlist_name).songs
 
     async def leave(self, ctx: commands.Context):
         voice_client = ctx.voice_client  # .guild.voice_client
@@ -163,7 +166,7 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name="save_queue", help="Saves the current queue to a file")
     async def save_queue(self, ctx, playlist_name):
-        self.save_current_queue_as_playlist(ctx.guild.id, playlist_name)
+        self.save_current_queue_as_playlist(ctx.guild.id, playlist_name, ctx.author.id, ctx.author.name)
         await ctx.send(f"Saved current queue as playlist {playlist_name}")
 
     @commands.hybrid_command(name="start_playing", help="Start Playing Music")
@@ -173,7 +176,8 @@ class MusicCog(commands.Cog):
         await ctx.send(f"Started Music... Hopefully")
 
     @commands.hybrid_command(name="load_queue", help="Loads a queue from a file")
-    async def load_queue(self, ctx, playlist_name):
+    async def load_queue(self, ctx: commands.context, playlist_name):
+        await ctx.send("Loading %s into queue" % playlist_name)
         self.load_playlist_to_queue(ctx.guild.id, playlist_name)
         await self.join(ctx)
         self.play_next(ctx)
@@ -203,14 +207,19 @@ class MusicCog(commands.Cog):
     def play_next(self, ctx):
         if ctx.voice_client is not None and not ctx.voice_client.is_playing():
             # Check for repeat mode first, repeat the current song if repeat mode is on
-            if ctx.guild.id in self.repeat_mode and self.repeat_mode[ctx.guild.id] == True:
+            if self.playlist_manager.is_repeat(ctx.guild.id):
                 next_song = self.now_playing[ctx.guild.id]
-                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
+                next_song.increment()
+                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song.file_path), after=lambda e: self.play_next(ctx))
             elif ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
                 # Repeat mode is off or not set, pop the next song from the queue and play it
                 next_song = self.music_queue[ctx.guild.id].pop(0)
                 self.now_playing[ctx.guild.id] = next_song
-                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
+                next_song.increment()
+                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song.file_path), after=lambda e: self.play_next(ctx))
+                if "thumbnail" in next_song.info:
+                    # await ctx.send(next_song.info["thumbnail"])
+                    asyncio.create_task(ctx.send(next_song.info["thumbnail"]))
             else:
                 asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
 
@@ -218,7 +227,7 @@ class MusicCog(commands.Cog):
     async def current_song(self, ctx: commands.Context):
         """ Show the current song playing """
         if ctx.guild.id in self.now_playing:
-            await ctx.send(f"Currently playing: {self.now_playing[ctx.guild.id]}")
+            await ctx.send(f"Currently playing: {self.now_playing[ctx.guild.id].raw_title}")
         else:
             await ctx.send("Nothing is playing right now.")
 
@@ -226,7 +235,7 @@ class MusicCog(commands.Cog):
     async def show_queue(self, ctx: commands.Context) -> None:
         """ Show the queue """
         if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
-            queue_list = "\n".join([f"{i + 1}. {song}" for i, song in enumerate(self.music_queue[ctx.guild.id])])
+            queue_list = "\n".join([f"{i + 1}. {song.raw_title}" for i, song in enumerate(self.music_queue[ctx.guild.id])])
             await ctx.send(f"Queue:\n{queue_list}")
         else:
             await ctx.send("The queue is empty.")
@@ -235,7 +244,8 @@ class MusicCog(commands.Cog):
     async def skip_song(self, ctx: commands.Context) -> None:
         """ Skip the current track """
         if ctx.voice_client.is_playing():
-            self.repeat_mode[ctx.guild.id] = False
+            #self.repeat_mode[ctx.guild.id] = False
+            self.playlist_manager.repeat[ctx.guild.id] = False
             ctx.voice_client.stop()
             await ctx.send("Skipped to the next song.")
         else:
@@ -261,27 +271,26 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name="repeat", help="Repeat the song forever")
     async def repeat(self, ctx: commands.Context):
-        if ctx.guild.id not in self.repeat_mode:
-            self.repeat_mode[ctx.guild.id] = False
-        self.repeat_mode[ctx.guild.id] = not self.repeat_mode[ctx.guild.id]
-        if self.repeat_mode[ctx.guild.id]:
+        if ctx.guild.id not in self.playlist_manager.repeat:
+            self.playlist_manager.repeat[ctx.guild.id] = False
+        self.playlist_manager.repeat[ctx.guild.id] = not self.playlist_manager.repeat[ctx.guild.id]
+        if self.playlist_manager.repeat[ctx.guild.id]:
             await ctx.send("Repeat mode is now ON.")
         else:
             await ctx.send("Repeat mode is now OFF.")
 
+    @commands.hybrid_command(name="shuffle", help="Shuffle any playlists loaded in the future (toggle)")
+    async def shuffle(self, ctx: commands.Context):
+        if ctx.guild.id not in self.playlist_manager.shuffle:
+            self.playlist_manager.shuffle[ctx.guild.id] = False
+        self.playlist_manager.shuffle[ctx.guild.id] = not self.playlist_manager.shuffle[ctx.guild.id]
+        if self.playlist_manager.shuffle[ctx.guild.id]:
+            await ctx.send("Shuffle mode is now ON.")
+        else:
+            await ctx.send("Shuffle mode is now OFF.")
+
     @commands.hybrid_command(name='mplay', help="Play a song from you know...")
     async def download_and_play_from_youtube(self, ctx: commands.Context, *, search_string):
-        YDL_OPTIONS = {
-            'format': 'bestaudio/best',
-            'noplaylist': 'True',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'default_search': 'auto',
-        }
         await ctx.send("Searching and downloading your request. This might take a moment.")
         self.bot.loop.create_task(self.download_and_play(ctx, search_string))
 
@@ -305,21 +314,65 @@ class MusicCog(commands.Cog):
     async def download_and_play(self, ctx, search_string):
         print("WORKING \n")
 
-        raw_title, title, filename = self.downloader.download(search_string)
+        song = None
 
-        if not filename:
+        song = self.downloader.download(ctx.author.id, ctx.author.name, search_string)
+        song.save()
+
+        if not song:
             await ctx.send("Error: Song not found.")
             return
 
         try:
             await self.join(ctx)
-            self.add_to_queue(ctx.guild.id, filename)
+
+            self.add_to_queue(ctx, song)
             if not ctx.voice_client.is_playing():
                 self.play_next(ctx)
-            await ctx.send(f"Added {raw_title} to the queue.")
+            await ctx.send(f"Added {song.raw_title} to the queue.")
         except Exception as e:
             print(e)
             await ctx.send("Error: Unable to add the song to queue.")
+
+    @commands.hybrid_command(name="create_playlist", help="Create a playlist")
+    async def create_playlist(self, ctx, playlist_name: str):
+        """
+        This command creates a new playlist
+        """
+        user_id = ctx.author.id  # or replace with your way to get user id
+        username = ctx.author.name  # or replace with your way to get username
+        self.playlist_manager.create_playlist(playlist_name, user_id, username)
+        await ctx.send(f"Playlist {playlist_name} has been created.")
+
+    async def _add_to_playlist(self, ctx, playlist_name, str):
+        song = self.downloader.download(ctx.author.id, ctx.author.name, str)
+        song.save()
+        self.playlist_manager.add_to_playlist(ctx, playlist_name, song)
+        await ctx.send(f"Song {song.title} has been added to the playlist {playlist_name}.")
+
+    @commands.hybrid_command(name="add_to_playlist", help="Add a song to playlist <playlist_name> <search query>")
+    async def add_to_playlist(self, ctx, playlist_name: str, song_query: str):
+        """
+        This command adds a song to a playlist
+        """
+        # Assuming that your bot has a function 'search_and_download_song'
+        # which downloads the song from YouTube and returns the Song object.
+
+        await ctx.send("Loading song and adding to playlist. This might take a moment.")
+        self.bot.loop.create_task(self._add_to_playlist(ctx, playlist_name, song_query))
+
+    @commands.hybrid_command(name="remove_from_playlist")
+    async def remove_from_playlist(self, ctx, playlist_name: str, song_index: int):
+        """
+        This command removes a song from a playlist
+        """
+        removed_song = self.playlist_manager.remove_from_playlist(playlist_name, song_index)
+        playlist = self.playlist_manager.load_playlist(playlist_name)
+        self.playlist_manager.save_playlist(playlist)
+        if removed_song is None:
+            await ctx.send("Failed to remove the song from the playlist. Please check the song index.")
+        else:
+            await ctx.send(f"Song {removed_song.title} has been removed from the playlist {playlist_name}.")
 
 
 async def setup(dbot: commands.Bot) -> None:
