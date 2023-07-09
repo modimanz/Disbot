@@ -25,6 +25,8 @@ class MusicCog(commands.Cog):
         self.now_playing = {}
         self.playlist_manager = PlaylistManager()
         self.downloader = MDownloader()
+        self.now_playing_images = {}
+        self.thumbnail_task = {}
 
     # @app_commands.command(name="mplay")
     # async def mplay(self, interaction: discord.Interaction) -> None:
@@ -55,6 +57,12 @@ class MusicCog(commands.Cog):
         self.voice_channel = channel
         return
 
+    def thumbnail_bot_stop(self, ctx):
+        if ctx.guild.id in self.thumbnail_task:
+            if self.thumbnail_task[ctx.guild.id] is not None:
+                self.thumbnail_task[ctx.guild.id].cancel()
+            del self.thumbnail_task[ctx.guild.id]
+
     def add_to_queue(self, ctx, song: Song):
         guild_id = ctx.guild.id
 
@@ -68,13 +76,15 @@ class MusicCog(commands.Cog):
 
     def load_playlist_to_queue(self, guild_id, playlist_name, append=False):
         if append:
-            self.music_queue[guild_id] = self.music_queue[guild_id] + self.playlist_manager.load_playlist(playlist_name).songs
+            self.music_queue[guild_id] = self.music_queue[guild_id] + self.playlist_manager.load_playlist(
+                playlist_name).songs
         else:
             self.music_queue[guild_id] = self.playlist_manager.load_playlist(playlist_name).songs
 
     async def leave(self, ctx: commands.Context):
         voice_client = ctx.voice_client  # .guild.voice_client
         if self.is_connected(ctx):
+            self.thumbnail_bot_stop(ctx)
             await voice_client.disconnect()
             await ctx.send("bye bye buddy")
         else:
@@ -108,7 +118,7 @@ class MusicCog(commands.Cog):
     async def stop_audio(self, ctx: commands.Context):
         """ Stop the playing audio """
         if ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+            await ctx.voice_client.disconnect()
             await ctx.send("Stopped Playing.")
         else:
             await ctx.send("Nothing is playing right now.")
@@ -166,62 +176,82 @@ class MusicCog(commands.Cog):
 
     @commands.hybrid_command(name="save_queue", help="Saves the current queue to a file")
     async def save_queue(self, ctx, playlist_name):
+        """
+        Save the queue to playlist
+
+        :param ctx:
+        :param playlist_name:
+        :return:
+        """
         self.save_current_queue_as_playlist(ctx.guild.id, playlist_name, ctx.author.id, ctx.author.name)
         await ctx.send(f"Saved current queue as playlist {playlist_name}")
 
     @commands.hybrid_command(name="start_playing", help="Start Playing Music")
     async def start_playing(self, ctx):
+        """
+        Start Playing if stopped or paused
+
+        :param ctx:
+        :return:
+        """
         await self.join(ctx)
         self.play_next(ctx)
         await ctx.send(f"Started Music... Hopefully")
 
     @commands.hybrid_command(name="load_queue", help="Loads a queue from a file")
     async def load_queue(self, ctx: commands.context, playlist_name):
+        """
+        Load a playlist into the queue
+
+        :param ctx:
+        :param playlist_name:
+        :return:
+        """
         await ctx.send("Loading %s into queue" % playlist_name)
         self.load_playlist_to_queue(ctx.guild.id, playlist_name)
         await self.join(ctx)
+
         self.play_next(ctx)
         await ctx.send(f"Loaded playlist {playlist_name} into queue")
 
-    # def play_next(self, ctx):
-    #    if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
-    #        if not ctx.voice_client.is_playing():
-    #            next_song = self.music_queue[ctx.guild.id].pop(0)
-    #            self.now_playing[ctx.guild.id] = next_song
-    #            ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
-    #    else:
-    #        asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
-
-    # def play_next(self, ctx):
-    #    if ctx.voice_client is not None and not ctx.voice_client.is_playing():
-    #        if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
-    #            if ctx.guild.id in self.repeat_mode and self.repeat_mode[ctx.guild.id] == True:
-    #                next_song = self.now_playing[ctx.guild.id]
-    #            else:
-    #                next_song = self.music_queue[ctx.guild.id].pop(0)
-    #                self.now_playing[ctx.guild.id] = next_song
-    #            ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song), after=lambda e: self.play_next(ctx))
-    #        else:
-    #            asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
+    async def image_sender(self, ctx):
+        last_image = None
+        while True:  # Replace with appropriate termination condition
+            if self.now_playing_images.get(ctx.guild.id) != last_image:
+                last_image = self.now_playing_images[ctx.guild.id]
+                await ctx.send(last_image)
+            await asyncio.sleep(1)  # Or however often you want to check
 
     def play_next(self, ctx):
+        """
+        Play the next sog check for repeat, send thumbnail
+
+        :param ctx:
+        :return:
+        """
+
+        if ctx.guild.id not in self.thumbnail_task:
+            self.thumbnail_task[ctx.guild.id] = self.bot.loop.create_task(self.image_sender(ctx))
+
+        next_song = None
         if ctx.voice_client is not None and not ctx.voice_client.is_playing():
             # Check for repeat mode first, repeat the current song if repeat mode is on
             if self.playlist_manager.is_repeat(ctx.guild.id):
                 next_song = self.now_playing[ctx.guild.id]
-                next_song.increment()
-                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song.file_path), after=lambda e: self.play_next(ctx))
             elif ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
                 # Repeat mode is off or not set, pop the next song from the queue and play it
                 next_song = self.music_queue[ctx.guild.id].pop(0)
                 self.now_playing[ctx.guild.id] = next_song
-                next_song.increment()
-                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song.file_path), after=lambda e: self.play_next(ctx))
                 if "thumbnail" in next_song.info:
-                    # await ctx.send(next_song.info["thumbnail"])
-                    asyncio.create_task(ctx.send(next_song.info["thumbnail"]))
+                    self.now_playing_images[ctx.guild.id] = next_song.info['thumbnail']
+                #   asyncio.create_task(ctx.send(next_song.info["thumbnail"]))
+
+            if next_song is not None:
+                next_song.increment()
+                ctx.voice_client.play(discord.FFmpegPCMAudio(source=next_song.file_path),
+                                      after=lambda e: self.play_next(ctx))
             else:
-                asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), self.bot.loop)
+                asyncio.run_coroutine_threadsafe(self.leave(ctx), self.bot.loop)
 
     @commands.hybrid_command(name='now_playing')
     async def current_song(self, ctx: commands.Context):
@@ -235,7 +265,8 @@ class MusicCog(commands.Cog):
     async def show_queue(self, ctx: commands.Context) -> None:
         """ Show the queue """
         if ctx.guild.id in self.music_queue and len(self.music_queue[ctx.guild.id]) > 0:
-            queue_list = "\n".join([f"{i + 1}. {song.raw_title}" for i, song in enumerate(self.music_queue[ctx.guild.id])])
+            queue_list = "\n".join(
+                [f"{i + 1}. {song.raw_title}" for i, song in enumerate(self.music_queue[ctx.guild.id])])
             await ctx.send(f"Queue:\n{queue_list}")
         else:
             await ctx.send("The queue is empty.")
@@ -244,7 +275,7 @@ class MusicCog(commands.Cog):
     async def skip_song(self, ctx: commands.Context) -> None:
         """ Skip the current track """
         if ctx.voice_client.is_playing():
-            #self.repeat_mode[ctx.guild.id] = False
+            # self.repeat_mode[ctx.guild.id] = False
             self.playlist_manager.repeat[ctx.guild.id] = False
             ctx.voice_client.stop()
             await ctx.send("Skipped to the next song.")
