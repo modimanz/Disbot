@@ -14,10 +14,25 @@ from .playlist_manager import *  # playlist_manager  # import PlaylistManager
 from .downloader import MDownloader
 
 
+def is_connected(ctx):
+    voice_state = ctx.guild.me.voice
+
+    if voice_state:
+        # If the bot is connected to a voice channel, print the channel's name
+        print("is_connected: True")
+        return True
+        # voice_channel = voice_state.channel
+        # await ctx.send(f'I am currently connected to the voice channel: {voice_channel.name}')
+    else:
+        # If the bot is not connected to any voice channel
+        print("is_connected: False")
+        return False
+        # await ctx.send('I am not connected to any voice channel.')
+
+
 class MusicCog(commands.Cog):
 
     def __init__(self, dbot: commands.Bot):
-        # self.repeat_mode = {}
         self.bot = dbot
         super().__init__()
         self.voice_channel = ""
@@ -28,14 +43,9 @@ class MusicCog(commands.Cog):
         self.now_playing_images = {}
         self.thumbnail_task = {}
 
-    # @app_commands.command(name="mplay")
-    # async def mplay(self, interaction: discord.Interaction) -> None:
-    #    """ /mplay """
-    #    await interaction.response.send_message("Ok i can't do that yet sorry buddy", ephemeral=True)
-
     async def join(self, ctx: commands.Context):
 
-        if self.is_connected(ctx):
+        if is_connected(ctx):
             print("Already Connected")
             return
 
@@ -75,15 +85,20 @@ class MusicCog(commands.Cog):
         self.playlist_manager.create_playlist(playlist_name, uid, uname, self.music_queue[guild_id])
 
     def load_playlist_to_queue(self, guild_id, playlist_name, append=False):
+
+        songs = self.playlist_manager.load_playlist(playlist_name).songs
+
+        if self.playlist_manager.is_shuffle(guild_id):
+            random.shuffle(songs)
+
         if append:
-            self.music_queue[guild_id] = self.music_queue[guild_id] + self.playlist_manager.load_playlist(
-                playlist_name).songs
+            self.music_queue[guild_id] = self.music_queue[guild_id] + songs
         else:
-            self.music_queue[guild_id] = self.playlist_manager.load_playlist(playlist_name).songs
+            self.music_queue[guild_id] = songs
 
     async def leave(self, ctx: commands.Context):
         voice_client = ctx.voice_client  # .guild.voice_client
-        if self.is_connected(ctx):
+        if is_connected(ctx):
             self.thumbnail_bot_stop(ctx)
             await voice_client.disconnect()
             await ctx.send("bye bye buddy")
@@ -91,22 +106,6 @@ class MusicCog(commands.Cog):
             await ctx.send("I ain't connected to no voice channel buddy!")
 
     # @app_commands.command(name="mrando")
-
-    def is_connected(self, ctx):
-
-        voice_state = ctx.guild.me.voice
-
-        if voice_state:
-            # If the bot is connected to a voice channel, print the channel's name
-            print("is_connected: True")
-            return True
-            # voice_channel = voice_state.channel
-            # await ctx.send(f'I am currently connected to the voice channel: {voice_channel.name}')
-        else:
-            # If the bot is not connected to any voice channel
-            print("is_connected: False")
-            return False
-            # await ctx.send('I am not connected to any voice channel.')
 
     @commands.hybrid_command(name="sync")
     async def sync(self, ctx: commands.Context) -> None:
@@ -130,27 +129,19 @@ class MusicCog(commands.Cog):
 
         voice_client = ctx.voice_client  # .client
 
-        # if voice_client.is_playing():
-        # //    voice_client.stop()
+        print("Finding Random Song\n")
 
-        print("Finding mp3 file\n")
+        song = random.choice(self.playlist_manager.load_songs_from_directory())
 
-        mp3_file = utils.fileman.get_random_music_file(settings.music_dir,
-                                                       True)  # "C:\\Users\\mreg\\Music\\DJ Music\\BLACKPINK, Selena Gomez - Ice Cream (with Selena Gomez).stem.m4a"
-
-        print("Found: %s\n" % mp3_file)
+        print("Found: %s\n" % song.title)
 
         if not voice_client.is_playing():
             print("Voice Client is playing\n")
             try:
                 # TODO Get a random file
-                self.add_to_queue(ctx.guild.id, mp3_file)
-                # self.music_queue[ctx.guild.id].append(mp3_file)
-                # voice_client.play(discord.FFmpegPCMAudio(source=mp3_file))  # , **FFMPEG_OPTIONS)
-                # self.music_queue[ctx.guild.id] = [mp3_file]
+                self.add_to_queue(ctx, song)
                 self.play_next(ctx)
                 await ctx.send("Playing")
-                # if self.is_connected(ctx):
 
             except Exception as e:
                 print(e)
@@ -159,20 +150,12 @@ class MusicCog(commands.Cog):
         else:
             print("Voice Client is not playing\n")
             try:
-                self.add_to_queue(ctx.guild.id, mp3_file)
+                self.add_to_queue(ctx, song)
 
                 await ctx.send("Song added to the queue.")
             except Exception as e:
                 print(e)
-                await ctx.send("I ainit able to add that to queue buddy!")
-
-        # Change the second property to True to have it rescan for new mp3 files
-
-        # TODO Set the FFMPEG_OPTIONS - 'before_options' is not a valid property!!
-        FFMPEG_OPTIONS = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn',
-        }
+                await ctx.send("I ain't able to add that to queue buddy!")
 
     @commands.hybrid_command(name="save_queue", help="Saves the current queue to a file")
     async def save_queue(self, ctx, playlist_name):
@@ -215,6 +198,12 @@ class MusicCog(commands.Cog):
         await ctx.send(f"Loaded playlist {playlist_name} into queue")
 
     async def image_sender(self, ctx):
+        """
+        Render the image to the channel
+
+        :param ctx:
+        :return:
+        """
         last_image = None
         while True:  # Replace with appropriate termination condition
             if self.now_playing_images.get(ctx.guild.id) != last_image:
@@ -229,6 +218,12 @@ class MusicCog(commands.Cog):
         :param ctx:
         :return:
         """
+
+        # Set the FFMPEG_OPTIONS - 'before_options' is not a valid property!!
+        # FFMPEG_OPTIONS = {
+        #    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+        #    'options': '-vn',
+        # }
 
         if ctx.guild.id not in self.thumbnail_task:
             self.thumbnail_task[ctx.guild.id] = self.bot.loop.create_task(self.image_sender(ctx))
@@ -277,7 +272,7 @@ class MusicCog(commands.Cog):
         if ctx.voice_client.is_playing():
             # self.repeat_mode[ctx.guild.id] = False
             self.playlist_manager.repeat[ctx.guild.id] = False
-            ctx.voice_client.stop()
+            await ctx.voice_client.stop()
             await ctx.send("Skipped to the next song.")
         else:
             await ctx.send("Nothing is playing to skip.")
@@ -296,7 +291,7 @@ class MusicCog(commands.Cog):
     async def remove_song(self, ctx: commands.Context, position: int) -> None:
         if ctx.guild.id in self.music_queue and 1 <= position <= len(self.music_queue[ctx.guild.id]):
             removed_song = self.music_queue[ctx.guild.id].pop(position - 1)  # Subtract 1 because lists are 0-indexed
-            await ctx.send(f"Removed song at position {position} from the queue.")
+            await ctx.send(f"Removed song '{removed_song.raw_title}' at position {position} from the queue.")
         else:
             await ctx.send("There is no song at that position in the queue.")
 
@@ -345,8 +340,6 @@ class MusicCog(commands.Cog):
     async def download_and_play(self, ctx, search_string):
         print("WORKING \n")
 
-        song = None
-
         song = self.downloader.download(ctx.author.id, ctx.author.name, search_string)
         song.save()
 
@@ -375,10 +368,10 @@ class MusicCog(commands.Cog):
         self.playlist_manager.create_playlist(playlist_name, user_id, username)
         await ctx.send(f"Playlist {playlist_name} has been created.")
 
-    async def _add_to_playlist(self, ctx, playlist_name, str):
-        song = self.downloader.download(ctx.author.id, ctx.author.name, str)
+    async def _add_to_playlist(self, ctx, playlist_name, search_str):
+        song = self.downloader.download(ctx.author.id, ctx.author.name, search_str)
         song.save()
-        self.playlist_manager.add_to_playlist(ctx, playlist_name, song)
+        self.playlist_manager.add_to_playlist(playlist_name, song)
         await ctx.send(f"Song {song.title} has been added to the playlist {playlist_name}.")
 
     @commands.hybrid_command(name="add_to_playlist", help="Add a song to playlist <playlist_name> <search query>")

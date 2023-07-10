@@ -55,6 +55,18 @@ class Dcog(commands.Cog):
         self.chatBot.set_temperature(ctx.author.id, temperature)
         await ctx.send(f"Set bot's temperature for user {ctx.author.id} to {temperature}")
 
+    async def _start_conversation(self, ctx: commands.Context):
+        try:
+            await self.chatBot.start_a_conversation(ctx)
+        except Exception as e:
+            print(e)
+            await ctx.send("Lets talk later.")
+
+    @commands.hybrid_command(name="start_conversation")
+    async def start_conversation(self, ctx: commands.Context):
+        await ctx.send("Starting Conversation")
+        self.bot.loop.create_task(self._start_conversation(ctx))
+
 
 async def setup(dbot: commands.Bot) -> None:
     await dbot.add_cog(Dcog(dbot))   # GLOBAL

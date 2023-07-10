@@ -4,6 +4,7 @@ import datetime
 import time
 import glob
 import re
+import random
 
 """
 TODO need to handle error cases, 
@@ -180,6 +181,7 @@ class Playlist:
 class PlaylistManager:
     def __init__(self):
         self.playlists_folder = 'playlists'
+        self.songs_folder = 'songs'
         os.makedirs(self.playlists_folder, exist_ok=True)  # Ensure the directory exists
         self.playlists = []
         self.load_all_playlists()
@@ -306,6 +308,34 @@ class PlaylistManager:
 
         return playlist_names
 
+    def load_songs_from_directory(self):
+        # List all files in the directory
+        files = os.listdir(self.songs_folder)
+
+        # Filter the list to only include JSON files
+        json_files = [file for file in files if file.endswith('.json')]
+
+        # Initialize an empty list to hold the Song objects
+        songs = []
+
+        # Loop through the JSON files
+        for json_file in json_files:
+            # Construct the full file path
+            file_path = os.path.join(self.songs_folder, json_file)
+
+            # Open the file and load the JSON data
+            with open(file_path, 'r') as file:
+                song_dict = json.load(file)
+
+            # Create a Song object from the dictionary
+            song = Song(song_dict['title'], song_dict['user_id'], song_dict['username'], song_dict['file_path'],
+                        song_dict['raw_title'], song_dict['search_string'])
+
+            # Add the Song object to the list
+            songs.append(song)
+
+        return songs
+
     @staticmethod
     def last_modified(filepath):
         t = os.path.getmtime(filepath)
@@ -333,7 +363,7 @@ class PlaylistManager:
                 self.playlists.append(playlist)
         self.prune_playlists()
 
-    def add_to_playlist(self, ctx, playlist_name, song):
+    def add_to_playlist(self, playlist_name, song):
         """
         Add song to playlist
 
