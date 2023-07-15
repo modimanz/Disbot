@@ -94,7 +94,7 @@ class ChatBot:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",  # "text-davinci-003",
             messages=prompt,
-            max_tokens=2000,
+            max_tokens=500,
             # n=1,
             # stop=None,
             temperature=temperature,
